@@ -1,0 +1,4 @@
+.env
+/data
+*.json
+/faiss_recipe_index
