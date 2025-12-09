@@ -478,13 +478,14 @@ class VectorStoreBuilder:
         documents = []
         total_recipes = len(df)
         
-        # 체크포인트 파일 경로
-        checkpoint_file = "allergen_detection_checkpoint.json"
+        # 체크포인트 파일 경로 (persist_directory와 같은 위치에 저장)
+        checkpoint_dir = os.path.dirname(self.persist_directory) if os.path.dirname(self.persist_directory) else "."
+        checkpoint_file = os.path.join(checkpoint_dir, f"{os.path.basename(self.persist_directory)}_allergen_checkpoint.json")
         
         print("🤖 LLM 배치 처리로 모든 레시피의 알레르기 정보를 추출하는 중...")
         print("⚡ 1000개씩 초대용량 배치 + 2초 대기로 속도 3배 향상!")
         print("⏳ 예상 시간: 하루 약 250,000개 처리 가능 (250 RPD × 1000개/배치)")
-        print("💾 진행 상황은 자동으로 저장됩니다 (중단 시 이어서 진행 가능)")
+        print(f"💾 진행 상황은 자동으로 저장됩니다: {checkpoint_file}")
         
         # 기존 체크포인트 로드
         all_allergens = []
@@ -495,8 +496,19 @@ class VectorStoreBuilder:
                 with open(checkpoint_file, 'r', encoding='utf-8') as f:
                     checkpoint_data = json.load(f)
                     all_allergens = checkpoint_data.get('allergens', [])
-                    start_idx = len(all_allergens)
-                    print(f"📂 체크포인트 발견: {start_idx}개 레시피 이미 처리됨 (이어서 진행)")
+                    saved_total = checkpoint_data.get('total', 0)
+                    
+                    # 데이터 개수가 일치하는지 확인
+                    if saved_total == total_recipes:
+                        start_idx = len(all_allergens)
+                        if start_idx >= total_recipes:
+                            print(f"✅ 모든 레시피({total_recipes}개) 알레르기 정보 이미 처리 완료!")
+                        else:
+                            print(f"📂 체크포인트 발견: {start_idx}/{total_recipes}개 이미 처리됨 (이어서 진행)")
+                    else:
+                        print(f"⚠️  CSV 데이터가 변경됨 (저장: {saved_total}개, 현재: {total_recipes}개) - 처음부터 시작")
+                        all_allergens = []
+                        start_idx = 0
             except Exception as e:
                 print(f"⚠️  체크포인트 로드 실패: {e}, 처음부터 시작합니다.")
                 all_allergens = []
@@ -705,13 +717,16 @@ class RagChatbot:
         # 벡터 저장소 로드 또는 구축
         if os.path.exists(faiss_index_path):
             print("기존 벡터 저장소를 로드 중입니다...")
+            print("✅ FAISS 인덱스 발견! 알레르기 정보가 이미 포함되어 있습니다.")
             self.vectorstore = FAISS.load_local(
                 faiss_index_path,
                 self.embeddings,
                 allow_dangerous_deserialization=True
             )
+            print(f"✅ 벡터 저장소 로드 완료!")
         else:
             print("벡터 저장소를 구축합니다...")
+            print("⚠️  이 작업은 시간이 오래 걸릴 수 있습니다.")
             builder = VectorStoreBuilder(self.embeddings, faiss_index_path)
             self.vectorstore = builder.build_from_csv(csv_path)
         
